@@ -1,0 +1,91 @@
+---
+- name: Deploy Student App with Monitoring
+  hosts: webservers
+  become: yes
+  vars:
+    project_root: /opt/student-app
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install required system packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+
+    - name: Add Docker GPG key
+      shell: |
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/docker-archive-keyring.gpg
+
+    - name: Add Docker repository
+      shell: |
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+
+    - name: Install Docker and Docker Compose
+      apt:
+        update_cache: yes
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create project directory
+      file:
+        path: "{{ project_root }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create frontend directory
+      file:
+        path: "{{ project_root }}/frontend"
+        state: directory
+        mode: '0755'
+
+    - name: Copy Docker Compose and Config files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ project_root }}/"
+        mode: '0644'
+      loop:
+        - docker-compose.yml
+        - prometheus.yml
+        - nginx.conf
+
+    - name: Copy Grafana Provisioning
+      copy:
+        src: grafana/
+        dest: "{{ project_root }}/grafana/"
+        mode: '0755'
+
+    - name: Copy Frontend files
+      copy:
+        src: ../frontend/
+        dest: "{{ project_root }}/frontend/"
+        mode: '0755'
+
+    - name: Deploy Stack using Docker Compose
+      shell: docker compose up -d --remove-orphans
+      args:
+        chdir: "{{ project_root }}"
+
+    - name: Prune unused Docker images
+      shell: docker image prune -f
